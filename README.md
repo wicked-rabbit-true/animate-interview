@@ -47,3 +47,46 @@ Please follow these exact steps to submit your completed assignment:
 4. **Submit a link to your forked repository** directly to us on onlinejobs.
 
 We look forward to seeing your creative approach!
+
+
+---
+
+## Solution notes
+
+### Run it
+
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # type-check + production build
+```
+
+Move the cursor to make the pet watch you. **Idle**, **Go for a walk** and **Play Fetch** switch behaviors. Press **D** to toggle a skeleton overlay (IK chains, joints, look target, fps).
+
+### Architecture
+
+```
+src/engine/
+  math.ts            vectors, frame-rate independent damping, springs, seeded RNG
+  ik.ts              analytic two-bone IK (law of cosines), allocation free
+  PetSimulation.ts   all behavior + skeleton + ball physics; outputs a plain-data PetPose
+  PetRenderer.ts     Canvas2D drawing of a PetPose (no state)
+  PetEngine.ts       pointer input + requestAnimationFrame loop, wires the two together
+src/main.ts          UI (Tailwind) and button wiring
+```
+
+The simulation never touches the DOM. It takes `setCursor(x, y)`, `setBehavior(...)` and `update(dt)`, and exposes `pose`, a plain object of joint positions, angles and ball state. `PetRenderer` and `PetEngine` are the only browser-specific files. A React Native port (Skia or Reanimated) replaces those two and reuses `math`, `ik` and `PetSimulation` unchanged.
+
+### How each requirement is met
+
+- **Idle.** Breathing is a sine-driven chest/body scale with a small chest lift, plus slow weight sway of the hips. The feet stay planted because the legs are solved with IK against fixed foot targets. Ears are damped springs, the tail wags with a travelling wave, and the eyes blink at random intervals.
+- **Cursor tracking.** The look target is exponentially damped toward the cursor. The head goal leans toward it inside a limited range, the neck is solved with two-bone IK, the head angle is clamped and damped, and the pupils ease independently. If the cursor stays behind the pet for a while, it turns around (the body mirror factor eases through zero).
+- **Fetch.** The ball is launched with a velocity solved to land at a random spot, then bounces and rolls with real ballistic physics. The pet crouches, then runs to an intercept point found by forward-simulating the ball (including bounces) against its own run speed. The neck stretches up to 1.65x so the mouth can reach the ball, and it hops (squash and stretch, tucked legs) when the ball is high. After the catch it carries the ball back to the cursor, drops it, celebrates, and returns to idle.
+- **Legs.** Four two-bone IK legs with a procedural gait. Feet are planted in world space. When a hip drifts too far, a diagonal pair takes an eased step with a lifted arc, while the other pair stays planted.
+
+### Performance and memory
+
+- No per-frame allocations in the simulation or renderer. Vectors are preallocated and IK writes into output objects.
+- Time-step safe: `dt` is clamped, and the simulation splits long frames into at most 1/60 s sub-steps. Damping uses `exp(-lambda * dt)`, so motion looks the same at 30, 60 or 120 Hz.
+- HiDPI aware backing store, kept in sync with CSS size through `ResizeObserver`. Pointer coordinates are mapped back into world units, so a CSS-scaled canvas still tracks correctly.
+- `destroy()` cancels the animation frame and removes every listener (`AbortController`). The loop also pauses while the tab is hidden, and Vite HMR disposes the old engine.
